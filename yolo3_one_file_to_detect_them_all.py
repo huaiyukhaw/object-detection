@@ -6,8 +6,9 @@ from keras.layers.merge import add, concatenate
 from keras.models import Model
 import struct
 import cv2
+import sys
 
-np.set_printoptions(threshold=np.nan)
+np.set_printoptions(threshold=sys.maxsize)
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
@@ -427,7 +428,7 @@ def _main_(args):
     draw_boxes(image, boxes, labels, obj_thresh) 
  
     # write the image with bounding boxes to file
-    cv2.imwrite(image_path[:-4] + '_detected' + image_path[-4:], (image).astype('uint8')) 
+    cv2.imwrite(image_path.split(".")[-2] + '_detected.' + image_path.split(".")[-1], (image).astype('uint8')) 
 
 if __name__ == '__main__':
     args = argparser.parse_args()
