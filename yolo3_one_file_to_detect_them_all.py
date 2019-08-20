@@ -1,12 +1,18 @@
 import argparse
 import os
 import numpy as np
+import pandas as pd
 from keras.layers import Conv2D, Input, BatchNormalization, LeakyReLU, ZeroPadding2D, UpSampling2D
 from keras.layers.merge import add, concatenate
 from keras.models import Model
+from keras import backend as K
+import tensorflow as tf
 import struct
 import cv2
 import sys
+
+K.tensorflow_backend._get_available_gpus()
+sess = tf.Session(config=tf.ConfigProto(log_device_placement=True))
 
 np.set_printoptions(threshold=sys.maxsize)
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
@@ -357,7 +363,7 @@ def do_nms(boxes, nms_thresh):
                 if bbox_iou(boxes[index_i], boxes[index_j]) >= nms_thresh:
                     boxes[index_j].classes[c] = 0
                     
-def draw_boxes(image, boxes, labels, obj_thresh):
+def draw_boxes(image, boxes, labels, obj_thresh, obj_detected):
     for box in boxes:
         label_str = ''
         label = -1
@@ -367,21 +373,25 @@ def draw_boxes(image, boxes, labels, obj_thresh):
                 label_str += labels[i]
                 label = i
                 print(labels[i] + ': ' + str(box.classes[i]*100) + '%')
+                obj_detected.append(labels[i])
                 
-        if label >= 0:
-            cv2.rectangle(image, (box.xmin,box.ymin), (box.xmax,box.ymax), (0,255,0), 3)
-            cv2.putText(image, 
-                        label_str + ' ' + str(box.get_score()), 
-                        (box.xmin, box.ymin - 13), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 
-                        1e-3 * image.shape[0], 
-                        (0,255,0), 2)
+        # if label >= 0:
+        #     cv2.rectangle(image, (box.xmin,box.ymin), (box.xmax,box.ymax), (0,255,0), 3)
+        #     cv2.putText(image, 
+        #                 label_str + ' ' + str(box.get_score()), 
+        #                 (box.xmin, box.ymin - 13), 
+        #                 cv2.FONT_HERSHEY_SIMPLEX, 
+        #                 1e-3 * image.shape[0], 
+        #                 (0,255,0), 2)
         
     return image      
 
 def _main_(args):
     weights_path = args.weights
-    image_path   = args.image
+    directory   = args.image
+
+    results_df = pd.DataFrame()
+    data = []   
 
     # set some parameters
     net_h, net_w = 416, 416
@@ -405,30 +415,49 @@ def _main_(args):
     weight_reader = WeightReader(weights_path)
     weight_reader.load_weights(yolov3)
 
-    # preprocess the image
-    image = cv2.imread(image_path)
-    image_h, image_w, _ = image.shape
-    new_image = preprocess_input(image, net_h, net_w)
+    index = 0
+    for filename in os.listdir(directory):
+        image_path = directory + "/" + filename
+        obj_detected = []
 
-    # run the prediction
-    yolos = yolov3.predict(new_image)
-    boxes = []
+        # preprocess the image
+        image = cv2.imread(image_path)
+        image_h, image_w, _ = image.shape
+        new_image = preprocess_input(image, net_h, net_w)
 
-    for i in range(len(yolos)):
-        # decode the output of the network
-        boxes += decode_netout(yolos[i][0], anchors[i], obj_thresh, nms_thresh, net_h, net_w)
+        # run the prediction
+        yolos = yolov3.predict(new_image)
+        boxes = []
 
-    # correct the sizes of the bounding boxes
-    correct_yolo_boxes(boxes, image_h, image_w, net_h, net_w)
+        for i in range(len(yolos)):
+            # decode the output of the network
+            boxes += decode_netout(yolos[i][0], anchors[i], obj_thresh, nms_thresh, net_h, net_w)
 
-    # suppress non-maximal boxes
-    do_nms(boxes, nms_thresh)     
+        # correct the sizes of the bounding boxes
+        correct_yolo_boxes(boxes, image_h, image_w, net_h, net_w)
 
-    # draw bounding boxes on the image using labels
-    draw_boxes(image, boxes, labels, obj_thresh) 
- 
-    # write the image with bounding boxes to file
-    cv2.imwrite(image_path.split(".")[-2] + '_detected.' + image_path.split(".")[-1], (image).astype('uint8')) 
+        # suppress non-maximal boxes
+        do_nms(boxes, nms_thresh)     
+
+        # draw bounding boxes on the image using labels
+        draw_boxes(image, boxes, labels, obj_thresh, obj_detected) 
+     
+        # write the image with bounding boxes to file
+        # cv2.imwrite(str(image_path.split(".")[-2] + '_detected.' + image_path.split(".")[-1]).replace(directory, "detected"), (image).astype('uint8')) 
+
+        data.append({
+            "image": filename,
+            "object": str(obj_detected).replace("[","").replace("]","").replace("'","")
+            })
+
+        print(index)
+        index += 1
+
+    temp_df = pd.DataFrame(data)
+    results_df = results_df.append(temp_df).reset_index(drop=True)
+    results_df.to_csv('objects.csv', index=False)
+    print("Save to CSV successfully.")
+
 
 if __name__ == '__main__':
     args = argparser.parse_args()
